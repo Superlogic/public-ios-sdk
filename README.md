@@ -45,6 +45,8 @@ import SwiftUI
 import SuperlogicWebViewKit
 
 struct ContentView: View {
+    let externalToken: String // Token from your authentication provider
+
     var body: some View {
         SLWebView(
             configuration: SLWebViewConfiguration(
@@ -53,7 +55,7 @@ struct ContentView: View {
                 ),
                 ssoConfiguration: SSOConfiguration(
                     clientId: "your-client-id",
-                    externalToken: "your-external-token", // Token from Google, Apple, etc.
+                    externalToken: externalToken,
                     protocolConfig: .oidc(OIDCProtocolConfiguration(
                         subjectIssuer: "google" // Your IDP identifier
                     )),
@@ -82,6 +84,20 @@ struct ContentView: View {
 Handle initialization errors with built-in error callbacks:
 
 ```swift
+let securityPolicy = SecurityPolicy(
+    allowedDomains: ["*.your-domain.com"]
+)
+
+let ssoConfiguration = SSOConfiguration(
+    clientId: "your-client-id",
+    externalToken: externalToken,
+    protocolConfig: .oidc(OIDCProtocolConfiguration(
+        subjectIssuer: "google"
+    )),
+    realm: "your-realm",
+    environment: .production
+)
+
 let configuration = SLWebViewConfiguration(
     securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfiguration,
@@ -113,6 +129,7 @@ let configuration = SLWebViewConfiguration(
 ```swift
 struct WebViewWithEvents: View {
     @State private var events: [SLWebViewEvent] = []
+    let configuration: SLWebViewConfiguration // Your configured instance
 
     var body: some View {
         SLWebView(configuration: configuration) { _ in }
@@ -131,9 +148,11 @@ SLWebView(configuration: configuration) { _ in }
     .onEvent(category: .commerce) { event in
         switch event.type {
         case .purchaseCompleted(let data):
-            handlePurchase(data)
+            // Handle purchase completion
+            print("Purchase completed: \(data)")
         case .checkoutStarted:
-            trackCheckoutStart()
+            // Track checkout initiation
+            print("Checkout started")
         default:
             break
         }
@@ -142,26 +161,7 @@ SLWebView(configuration: configuration) { _ in }
 
 ## Configuration
 
-### Basic Configuration
-
 The SDK requires two main components: security policy and SSO configuration.
-
-```swift
-let config = SLWebViewConfiguration(
-    securityPolicy: SecurityPolicy(
-        allowedDomains: ["*.your-domain.com", "api.example.com"]
-    ),
-    ssoConfiguration: SSOConfiguration(
-        clientId: "your-client-id",
-        externalToken: externalToken,
-        protocolConfig: .oidc(OIDCProtocolConfiguration(
-            subjectIssuer: "google"
-        )),
-        realm: "your-realm",
-        environment: .production
-    )
-)
-```
 
 ### Security Policy
 
@@ -181,7 +181,9 @@ let securityPolicy = SecurityPolicy(
 )
 ```
 
-### SSO Configuration with OIDC
+### SSO Configuration
+
+#### Using OIDC
 
 ```swift
 let ssoConfig = SSOConfiguration(
@@ -191,16 +193,16 @@ let ssoConfig = SSOConfiguration(
         subjectIssuer: "google"     // Identifier for your IDP
     )),
     realm: "your-realm",
-    environment: .production        // Or .staging, .development, .local(port:)
+    environment: .production
 )
 ```
 
-### SSO Configuration with SAML
+#### Using SAML
 
 ```swift
 let ssoConfig = SSOConfiguration(
     clientId: "mobile-app-client",
-    externalToken: samlAssertion,
+    externalToken: samlAssertion,  // SAML assertion from provider
     protocolConfig: .saml(SAMLProtocolConfiguration(
         entityId: "your-entity-id"
     )),
@@ -213,19 +215,7 @@ let ssoConfig = SSOConfiguration(
 
 ### Token Exchange with PKCE
 
-The SDK uses PKCE (Proof Key for Code Exchange) for secure token exchange:
-
-```swift
-let ssoConfig = SSOConfiguration(
-    clientId: "mobile-app-client",  // Must be configured as public client
-    externalToken: "external-provider-token",
-    protocolConfig: .oidc(OIDCProtocolConfiguration(
-        subjectIssuer: "google"  // IDP identifier
-    )),
-    realm: "your-realm",
-    environment: .production
-)
-```
+The SDK uses PKCE (Proof Key for Code Exchange) for secure token exchange. Configure your authentication client as a public client (no client secret required).
 
 ### app_start_url Configuration
 
@@ -265,26 +255,23 @@ environment: .custom(authServerBaseURL: "https://your-auth-server.com")
 
 ### Onboarding Flow Support
 
-The SDK includes built-in support for user onboarding flows, automatically handling new user registration and initial setup:
+The SDK includes built-in support for user onboarding flows. When a new user needs to be onboarded, the SDK:
 
-```swift
-let config = SLWebViewConfiguration(
-    securityPolicy: securityPolicy,
-    ssoConfiguration: ssoConfiguration,
-    onInitializationError: { error in
-        if case .onboardingFailed(let details) = error {
-            // Handle onboarding failure
-            print("Onboarding failed: \(details)")
-        }
-    }
-)
-```
-
-The onboarding flow:
-1. Detects when a user needs onboarding
+1. Detects the onboarding requirement from the authentication server response
 2. Presents an onboarding WebView automatically
 3. Handles the onboarding completion
 4. Continues with normal authentication flow
+
+Handle onboarding errors through the initialization error callback:
+
+```swift
+onInitializationError: { error in
+    if case .onboardingFailed(let details) = error {
+        // Handle onboarding failure
+        print("Onboarding failed: \(details)")
+    }
+}
+```
 
 ## Event System
 
@@ -303,6 +290,7 @@ The onboarding flow:
 ```swift
 struct AdvancedEventHandling: View {
     @State private var eventStream: SLWebViewEvents?
+    let configuration: SLWebViewConfiguration // Your configured instance
 
     var body: some View {
         SLWebView(configuration: configuration) { _ in }
@@ -311,7 +299,8 @@ struct AdvancedEventHandling: View {
                 guard let stream = eventStream else { return }
 
                 for await event in stream.commerceEvents {
-                    handleCommerceEvent(event)
+                    // Process commerce events as they arrive
+                    print("Commerce event: \(event)")
                 }
             }
     }
@@ -319,18 +308,6 @@ struct AdvancedEventHandling: View {
 ```
 
 ## Security
-
-### Domain Allowlisting
-
-```swift
-let securityPolicy = SecurityPolicy(
-    allowedDomains: [
-        "www.your-domain.com",
-        "*.your-domain.com",  // Wildcard subdomain
-        "api.trusted-partner.com"
-    ]
-)
-```
 
 ### Content Security Policy
 
