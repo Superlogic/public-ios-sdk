@@ -61,7 +61,8 @@ struct ContentView: View {
                     )),
                     realm: "your-realm",
                     environment: .production
-                )
+                ),
+                startUrl: URL(string: "https://app.your-domain.com")!
             )
         ) { action in
             switch action {
@@ -77,7 +78,7 @@ struct ContentView: View {
 }
 ```
 
-**Note:** The destination URL is extracted from the `app_start_url` claim in the access token, not configured directly. This ensures users are redirected only to admin-approved URLs.
+**Note:** The `startUrl` must be included in `allowedDomains` to ensure users only navigate to approved destinations.
 
 ### Error Handling
 
@@ -101,6 +102,7 @@ let ssoConfiguration = SSOConfiguration(
 let configuration = SLWebViewConfiguration(
     securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfiguration,
+    startUrl: URL(string: "https://app.your-domain.com")!,
     onInitializationError: { error in
         // Handle the error appropriately
         print("Initialization failed: \(error.errorDescription ?? "")")
@@ -108,8 +110,8 @@ let configuration = SLWebViewConfiguration(
 
         // You can show an alert, log to analytics, or retry
         switch error {
-        case .missingAppStartUrl:
-            // Token is missing app_start_url claim
+        case .invalidAppStartUrl:
+            // startUrl domain not in allowedDomains
             break
         case .tokenValidationFailed:
             // Token is invalid or expired
@@ -217,20 +219,9 @@ let ssoConfig = SSOConfiguration(
 
 The SDK uses PKCE (Proof Key for Code Exchange) for secure token exchange. Configure your authentication client as a public client (no client secret required).
 
-### app_start_url Configuration
+### startUrl Configuration
 
-The destination URL is extracted from the `app_start_url` claim in the access token. Configure this in your authentication server:
-
-1. **Add Client Attribute:**
-   - Add attribute: `app_start_url` with your web application URL
-
-2. **Create Protocol Mapper:**
-   - Token Claim Name: `app_start_url`
-   - Add to access token: ON
-
-3. **Security:**
-   - URL must be in the `allowedDomains` list
-   - Ensures users only navigate to admin-approved destinations
+The destination URL is provided by the integrator via the `startUrl` parameter on `SLWebViewConfiguration`. The `startUrl` domain must be included in the `allowedDomains` list.
 
 ### Environment Configuration
 
@@ -365,8 +356,7 @@ public enum SLWebViewAction: Sendable {
 
 ```swift
 public enum SSOError: LocalizedError {
-    case missingAppStartUrl          // Token missing app_start_url claim
-    case invalidAppStartUrl(String)  // Invalid URL in app_start_url
+    case invalidAppStartUrl(String)  // startUrl validation failed
     case tokenValidationFailed        // Token signature/expiry validation failed
     case ssoAuthenticationFailed      // SSO authentication process failed
     case onboardingFailed(String)     // User onboarding flow failed
@@ -392,15 +382,9 @@ public enum NavigationError: LocalizedError {
 ### Common Issues
 
 **WebView not loading:**
-- Ensure `app_start_url` claim is configured in your authentication server
-- Check domain is in `allowedDomains` list
+- Ensure `startUrl` domain is in `allowedDomains` list
 - Verify external token is valid
 - Check network connectivity
-
-**Missing app_start_url error:**
-- Add protocol mapper for `app_start_url` claim
-- Ensure mapper is added to access token
-- Verify client attribute contains the URL
 
 **Token validation failed:**
 - Check token expiry
@@ -449,9 +433,9 @@ SLWebViewConfiguration.default(
 // NEW (2.0)
 SLWebViewConfiguration(
     securityPolicy: SecurityPolicy(allowedDomains: ["*.app.com"]),
-    ssoConfiguration: ssoConfig
+    ssoConfiguration: ssoConfig,
+    startUrl: URL(string: "https://app.example.com")!
 )
-// URL now comes from app_start_url token claim
 ```
 
 #### 2. Updated SSO Configuration
@@ -494,7 +478,7 @@ SLWebViewConfiguration(
 #### 5. Security Enhancements
 - PKCE implementation for OAuth flows
 - No client secret required (public client)
-- app_start_url validation from token claims
+- startUrl domain validation against allowedDomains
 
 ## License
 
