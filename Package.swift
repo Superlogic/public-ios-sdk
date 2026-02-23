@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "SuperlogicWebViewKit",
     platforms: [
-        .iOS(.v15)
+        .iOS(.v17)
     ],
     products: [
         .library(
@@ -17,8 +17,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SuperlogicWebViewKit",
-            url: "https://github.com/Superlogic/public-ios-sdk/releases/download/2.0.0/SuperlogicWebViewKit.xcframework.zip",
-            checksum: "90b1da1317800a37b7e5aa20cc6ae1f101c6741ef8d56ce457c473fbf62b5249"
+            url: "https://github.com/Superlogic/public-ios-sdk/releases/download/2.0.1/SuperlogicWebViewKit.xcframework.zip",
+            checksum: "17fa94b07046140d8e474c42ca52799e0d9531d637b743e5590caeee54550d8e"
         ),
     ]
 )
