@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "SuperlogicWebViewKit",
     platforms: [
-        .iOS(.v17)
+        .iOS(.v15)
     ],
     products: [
         .library(
