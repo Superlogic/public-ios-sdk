@@ -623,7 +623,7 @@ SLWebView(configuration: configuration)
 
 ## Migration Guide
 
-### Migrating from 1.x to 2.0
+### Migrating from previous versions
 
 #### 1. `startUrl` is now a required parameter on `SLWebViewConfiguration`
 
@@ -642,21 +642,40 @@ SLWebViewConfiguration(
 )
 ```
 
-#### 2. Updated SSO Configuration
+#### 2. `SLWebView` init no longer takes an action closure
 
 ```swift
-// OLD (1.x)
+// OLD (2.0.x) — required onAction closure, showToolbar, toolbarPlacement
+SLWebView(configuration: configuration, showToolbar: true) { action in
+    switch action {
+    case .close: dismiss()
+    case .reload: break
+    }
+}
+
+// NEW — no closure; use .onEvent for reactions
+SLWebView(configuration: configuration)
+    .onEvent(category: .lifecycle) { event in
+        if case .reloadRequested = event.type { /* handle */ }
+    }
+```
+
+#### 3. Updated SSO Configuration
+
+```swift
+// OLD (2.0.x)
 SSOConfiguration(
     clientId: "client",
-    idToken: token,
+    externalToken: token,   // was externalToken
     subjectIssuer: "google",
-    realm: "realm"
+    realm: "realm",
+    environment: .production
 )
 
-// NEW (2.0)
+// NEW
 SSOConfiguration(
     clientId: "client",
-    idToken: token,
+    idToken: token,         // renamed to idToken
     protocolConfig: .oidc(OIDCProtocolConfiguration(
         subjectIssuer: "google"
     )),
@@ -665,7 +684,7 @@ SSOConfiguration(
 )
 ```
 
-#### 3. Updated SecurityPolicy
+#### 4. Updated SecurityPolicy
 
 ```swift
 // OLD (1.x) — had enforceHTTPS, blockPopups, contentSecurityPolicy params
@@ -681,7 +700,7 @@ SecurityPolicy(
 )
 ```
 
-#### 4. Added initialization error callback
+#### 5. Added initialization error callback
 
 ```swift
 SLWebViewConfiguration(
@@ -695,7 +714,48 @@ SLWebViewConfiguration(
 )
 ```
 
-#### 5. iOS 15+ support (previously iOS 17+)
+#### 6. iOS 15+ support (previously iOS 17+)
+
+#### 7. `EnvironmentConfig` presets removed
+
+```swift
+// OLD (2.0.x) — built-in presets
+environment: .production
+environment: .staging
+environment: .development
+
+// NEW — use .custom() for all remote environments
+environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+environment: .local()         // local dev (port 8200)
+environment: .local(port: 8080)
+```
+
+#### 8. `SAMLProtocolConfiguration` parameter renamed
+
+```swift
+// OLD (2.0.x)
+SAMLProtocolConfiguration(entityId: "your-entity-id")
+
+// NEW
+SAMLProtocolConfiguration(identityProviderAlias: "your-idp-alias")
+```
+
+#### 9. `eventStream` binding type changed
+
+```swift
+// OLD (2.0.x)
+@State private var eventStream: SLWebViewEvents?
+// ...
+.eventStream($eventStream)
+for await event in stream.commerceEvents { }
+
+// NEW
+@State private var eventStream: AsyncStream<SLWebViewEvent>?
+// ...
+.eventStream($eventStream)
+for await event in stream { }
+// For filtered streams, use viewModel.events.commerceEvents directly
+```
 
 ## License
 
