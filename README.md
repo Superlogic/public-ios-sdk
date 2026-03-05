@@ -99,7 +99,7 @@ let configuration = SLWebViewConfiguration(
         case .tokenValidationFailed(let message):
             // Token is invalid or expired
             print(message)
-        case .invalidAppStartUrl(let message):
+        case .invalidStartUrl(let message):
             // startUrl failed domain validation
             print(message)
         case .networkError(let message):
@@ -502,7 +502,7 @@ Delivered to the `onInitializationError` callback:
 public enum InitializationError: LocalizedError, Sendable {
     case ssoAuthenticationFailed(String)  // SSO token exchange failed
     case tokenValidationFailed(String)    // Token is invalid or expired
-    case invalidAppStartUrl(String)       // startUrl domain not in allowedDomains, or not HTTPS
+    case invalidStartUrl(String)       // startUrl domain not in allowedDomains, or not HTTPS
     case webViewCreationFailed(String)    // WebView setup failed
     case networkError(String)             // Network connectivity issue during init
     case onboardingFailed(String)         // Onboarding flow failed
