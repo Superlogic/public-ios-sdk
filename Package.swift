@@ -17,8 +17,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SuperlogicWebViewKit",
-            url: "https://github.com/Superlogic/public-ios-sdk/releases/download/2.0.10/SuperlogicWebViewKit.xcframework.zip",
-            checksum: "a9871d62bbc0cfc1785d90fb9a6df748d6f9c8e56ac8af4d62cff5d9df25f1cb"
+            url: "https://github.com/Superlogic/public-ios-sdk/releases/download/2.0.11/SuperlogicWebViewKit.xcframework.zip",
+            checksum: "7cd5780375e649813c5bb3c7e20818b33cff31b0d229fc7291085072083d2f73"
         ),
     ]
 )
