@@ -6,11 +6,11 @@ A modern, secure WebView SDK for iOS applications built with SwiftUI, providing 
 
 - **Secure by Default**: HTTPS-only, domain allowlisting, and configurable security policies
 - **SwiftUI Native**: Built specifically for SwiftUI with iOS 15+ support
-- **Reactive Events**: Modern AsyncStream-based event system with category filtering
+- **Reactive Events**: AsyncStream-based event system with category filtering
 - **SSO Integration**: Built-in Single Sign-On using PKCE and cookie-based authentication
 - **Onboarding Support**: Seamless onboarding flow integration for new users
 - **Error Recovery**: Built-in initialization error callbacks with recovery guidance
-- **Full-Featured**: Loading states, error handling, and customizable toolbar
+- **Full-Featured**: Loading states, navigation controls, and error handling
 
 ## Requirements
 
@@ -45,7 +45,7 @@ import SwiftUI
 import SuperlogicWebViewKit
 
 struct ContentView: View {
-    let externalToken: String // Token from your authentication provider
+    let idToken: String // ID token from your external identity provider
 
     var body: some View {
         SLWebView(
@@ -55,70 +55,61 @@ struct ContentView: View {
                 ),
                 ssoConfiguration: SSOConfiguration(
                     clientId: "your-client-id",
-                    externalToken: externalToken,
+                    idToken: idToken,
                     protocolConfig: .oidc(OIDCProtocolConfiguration(
-                        subjectIssuer: "google" // Your IDP identifier
+                        subjectIssuer: "google" // Your IDP alias in Keycloak
                     )),
                     realm: "your-realm",
-                    environment: .production
-                )
+                    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+                ),
+                startUrl: URL(string: "https://app.your-domain.com")!
             )
-        ) { action in
-            switch action {
-            case .close:
-                // Handle close action
-                break
-            case .reload:
-                // Reload is handled automatically
-                break
-            }
-        }
+        )
     }
 }
 ```
 
-**Note:** The destination URL is extracted from the `app_start_url` claim in the access token, not configured directly. This ensures users are redirected only to admin-approved URLs.
-
 ### Error Handling
 
-Handle initialization errors with built-in error callbacks:
+Handle initialization errors via the `onInitializationError` callback:
 
 ```swift
-let securityPolicy = SecurityPolicy(
-    allowedDomains: ["*.your-domain.com"]
-)
-
-let ssoConfiguration = SSOConfiguration(
-    clientId: "your-client-id",
-    externalToken: externalToken,
-    protocolConfig: .oidc(OIDCProtocolConfiguration(
-        subjectIssuer: "google"
-    )),
-    realm: "your-realm",
-    environment: .production
-)
-
 let configuration = SLWebViewConfiguration(
-    securityPolicy: securityPolicy,
-    ssoConfiguration: ssoConfiguration,
+    securityPolicy: SecurityPolicy(
+        allowedDomains: ["*.your-domain.com"]
+    ),
+    ssoConfiguration: SSOConfiguration(
+        clientId: "your-client-id",
+        idToken: idToken,
+        protocolConfig: .oidc(OIDCProtocolConfiguration(
+            subjectIssuer: "google"
+        )),
+        realm: "your-realm",
+        environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+    ),
+    startUrl: URL(string: "https://app.your-domain.com")!,
     onInitializationError: { error in
-        // Handle the error appropriately
         print("Initialization failed: \(error.errorDescription ?? "")")
         print("Resolution: \(error.resolutionGuidance)")
 
-        // You can show an alert, log to analytics, or retry
         switch error {
-        case .missingAppStartUrl:
-            // Token is missing app_start_url claim
-            break
-        case .tokenValidationFailed:
+        case .ssoAuthenticationFailed(let message):
+            // SSO token exchange failed
+            print(message)
+        case .tokenValidationFailed(let message):
             // Token is invalid or expired
-            break
-        case .networkError:
+            print(message)
+        case .invalidStartUrl(let message):
+            // startUrl failed domain validation
+            print(message)
+        case .networkError(let message):
             // Network connectivity issue
-            break
-        default:
-            break
+            print(message)
+        case .onboardingFailed(let message):
+            // Onboarding flow failed
+            print(message)
+        case .webViewCreationFailed(let message):
+            print(message)
         }
     }
 )
@@ -127,31 +118,21 @@ let configuration = SLWebViewConfiguration(
 ### Event Handling
 
 ```swift
-struct WebViewWithEvents: View {
-    @State private var events: [SLWebViewEvent] = []
-    let configuration: SLWebViewConfiguration // Your configured instance
-
-    var body: some View {
-        SLWebView(configuration: configuration) { _ in }
-            .onEvent { event in
-                print("Received event: \(event.type.name)")
-                events.append(event)
-            }
+SLWebView(configuration: configuration)
+    .onEvent { event in
+        print("[\(event.category.rawValue)] event received")
     }
-}
 ```
 
 ### Category-Based Event Filtering
 
 ```swift
-SLWebView(configuration: configuration) { _ in }
+SLWebView(configuration: configuration)
     .onEvent(category: .commerce) { event in
         switch event.type {
-        case .purchaseCompleted(let data):
-            // Handle purchase completion
-            print("Purchase completed: \(data)")
+        case .purchaseCompleted:
+            print("Purchase completed")
         case .checkoutStarted:
-            // Track checkout initiation
             print("Checkout started")
         default:
             break
@@ -161,113 +142,162 @@ SLWebView(configuration: configuration) { _ in }
 
 ## Configuration
 
-The SDK requires two main components: security policy and SSO configuration.
+### SLWebViewConfiguration
+
+```swift
+SLWebViewConfiguration(
+    securityPolicy: SecurityPolicy,       // Required
+    ssoConfiguration: SSOConfiguration,  // Required
+    startUrl: URL,                        // Required - initial URL after authentication
+    allowsJavaScript: Bool = true,
+    mediaPlaybackRequiresUserAction: Bool = true,
+    basicAuthHeaderValue: String? = nil,  // For dev/staging basic auth only
+    authButtonPatterns: AuthButtonPatterns = .defaultEnglish,
+    onInitializationError: (@Sendable (InitializationError) -> Void)? = nil
+)
+```
+
+**Presets:**
+
+```swift
+// Strict: JavaScript disabled, localStorage blocked, media requires user action
+SLWebViewConfiguration.strict(
+    securityPolicy: securityPolicy,
+    ssoConfiguration: ssoConfig,
+    startUrl: startUrl
+)
+
+// Relaxed: JavaScript enabled, localStorage allowed, media plays automatically
+SLWebViewConfiguration.relaxed(
+    securityPolicy: securityPolicy,
+    ssoConfiguration: ssoConfig,
+    startUrl: startUrl
+)
+```
 
 ### Security Policy
-
-Configure domain restrictions and security settings:
 
 ```swift
 let securityPolicy = SecurityPolicy(
     allowedDomains: [
-        "*.your-domain.com",    // Wildcard subdomain
-        "api.example.com",      // Specific domain
-        "secure.partner.com"
+        "*.your-domain.com",  // Wildcard: matches app.your-domain.com and your-domain.com
+        "api.example.com"     // Exact domain match
     ],
-    enforceHTTPS: true,         // Default: true
-    blockPopups: true,          // Default: false
-    blockLocalStorage: false,   // Default: false
-    contentSecurityPolicy: "default-src 'self'"  // Optional CSP header
+    allowsLocalStorage: false // Default: false
 )
 ```
+
+Domain matching rules:
+- `"*.example.com"` matches `app.example.com` and `example.com`
+- `"example.com"` matches only `example.com`
+- Empty `allowedDomains` blocks all navigation (secure by default)
 
 ### SSO Configuration
 
-#### Using OIDC
+#### Token exchange (external IDP → Keycloak)
+
+Use when the user authenticates with an external provider (Google, Apple, etc.) and you have their ID token:
 
 ```swift
 let ssoConfig = SSOConfiguration(
     clientId: "mobile-app-client",
-    externalToken: googleIdToken,  // Token from external provider
+    idToken: externalIdToken,       // ID token from the external provider
     protocolConfig: .oidc(OIDCProtocolConfiguration(
-        subjectIssuer: "google"     // Identifier for your IDP
+        subjectIssuer: "google"     // IDP alias as configured in Keycloak
     )),
     realm: "your-realm",
-    environment: .production
+    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
 )
 ```
 
-#### Using SAML
+#### Pre-authenticated (auth code flow — app holds Keycloak tokens)
+
+Use when your app has already completed the authorization code flow and holds Keycloak tokens directly:
+
+```swift
+let ssoConfig = SSOConfiguration(
+    credentials: AuthCredentials(
+        clientId: "mobile-app-client",
+        idToken: keycloakIdToken,
+        accessToken: keycloakAccessToken,   // Optional, enables mobile session
+        refreshToken: keycloakRefreshToken  // Optional, enables mobile session
+    ),
+    protocolConfig: .oidc(OIDCProtocolConfiguration(
+        subjectIssuer: "your-idp-alias",
+        isPreAuthenticated: true
+    )),
+    realm: "your-realm",
+    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+)
+```
+
+#### SAML
 
 ```swift
 let ssoConfig = SSOConfiguration(
     clientId: "mobile-app-client",
-    externalToken: samlAssertion,  // SAML assertion from provider
+    idToken: samlAssertion,
     protocolConfig: .saml(SAMLProtocolConfiguration(
-        entityId: "your-entity-id"
+        identityProviderAlias: "your-saml-idp"
     )),
     realm: "your-realm",
-    environment: .production
+    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
 )
 ```
-
-## SSO Integration
-
-### Token Exchange with PKCE
-
-The SDK uses PKCE (Proof Key for Code Exchange) for secure token exchange. Configure your authentication client as a public client (no client secret required).
-
-### app_start_url Configuration
-
-The destination URL is extracted from the `app_start_url` claim in the access token. Configure this in your authentication server:
-
-1. **Add Client Attribute:**
-   - Add attribute: `app_start_url` with your web application URL
-
-2. **Create Protocol Mapper:**
-   - Token Claim Name: `app_start_url`
-   - Add to access token: ON
-
-3. **Security:**
-   - URL must be in the `allowedDomains` list
-   - Ensures users only navigate to admin-approved destinations
 
 ### Environment Configuration
 
-Configure the SDK to connect to your authentication server:
-
 ```swift
-// Production
-environment: .production
-
-// Staging
-environment: .staging
-
-// Development
-environment: .development
-
-// Local Development
+// Local development (defaults to port 8200)
+environment: .local()
 environment: .local(port: 8080)
 
-// Custom Server
-environment: .custom(authServerBaseURL: "https://your-auth-server.com")
+// Any remote environment (staging, production, etc.)
+environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
 ```
 
-### Onboarding Flow Support
+### OIDC Security Options
 
-The SDK includes built-in support for user onboarding flows. When a new user needs to be onboarded, the SDK:
+`OIDCProtocolConfiguration` accepts an `OIDCSecurityOptions` value controlling PKCE, state, nonce, and signature validation:
 
-1. Detects the onboarding requirement from the authentication server response
-2. Presents an onboarding WebView automatically
-3. Handles the onboarding completion
-4. Continues with normal authentication flow
+```swift
+// .secure is the default — all protections enabled, recommended for production
+OIDCProtocolConfiguration(
+    subjectIssuer: "google",
+    securityOptions: .secure
+)
 
-Handle onboarding errors through the initialization error callback:
+// .relaxed disables PKCE, state, nonce, and signature validation
+// WARNING: for local testing only, never use in production
+OIDCProtocolConfiguration(
+    subjectIssuer: "google",
+    securityOptions: .relaxed
+)
+
+// Custom options
+OIDCProtocolConfiguration(
+    subjectIssuer: "google",
+    securityOptions: OIDCSecurityOptions(
+        enablePKCE: true,
+        enableState: true,
+        enableNonce: true,
+        validateSignature: true,
+        jwksURL: "https://auth.your-domain.com/realms/your-realm/protocol/openid-connect/certs",
+        expectedIssuer: "https://auth.your-domain.com/realms/your-realm",
+        clockSkewTolerance: 30
+    )
+)
+```
+
+### Onboarding Flow
+
+The SDK automatically handles onboarding when a new user must accept terms before proceeding. When onboarding is required the SDK presents the onboarding screen, handles acceptance or decline, and continues the authentication flow.
+
+Handle onboarding errors via the initialization error callback:
 
 ```swift
 onInitializationError: { error in
     if case .onboardingFailed(let details) = error {
-        // Handle onboarding failure
         print("Onboarding failed: \(details)")
     }
 }
@@ -277,50 +307,146 @@ onInitializationError: { error in
 
 ### Event Categories
 
-| Category | Events |
-|----------|--------|
-| **Lifecycle** | `componentLoaded`, `errorOccurred`, `reloadRequested` |
-| **Session** | `userSignedIn`, `userSignedOut`, `tokenExpired`, `sessionTimedOut`, `sessionRefreshed` |
-| **Commerce** | `purchaseCompleted`, `purchaseFailed`, `checkoutStarted`, `checkoutAbandoned` |
-| **Navigation** | `pageChanged`, `navigationBlocked`, `externalLinkRequested`, `deepLinkRequested` |
-| **Debug** | `logged` |
+| Category | Event types |
+|----------|-------------|
+| **lifecycle** | `componentLoaded`, `errorOccurred`, `tokenExpired`, `reloadRequested` |
+| **session** | `userSignedIn`, `userSignedOut`, `sessionTimedOut`, `sessionRefreshed` |
+| **commerce** | `purchaseCompleted`, `purchaseFailed`, `checkoutStarted`, `checkoutAbandoned` |
+| **navigation** | `pageChanged`, `navigationBlocked`, `externalLinkRequested`, `deepLinkRequested` |
+| **debug** | `logged` |
 
-### Event Stream Access
+### Subscribing via view modifiers
 
 ```swift
-struct AdvancedEventHandling: View {
-    @State private var eventStream: SLWebViewEvents?
-    let configuration: SLWebViewConfiguration // Your configured instance
+// All events
+SLWebView(configuration: configuration)
+    .onEvent { event in
+        print("[\(event.category.rawValue)] event received")
+    }
+
+// Filtered by category
+SLWebView(configuration: configuration)
+    .onEvent(category: .session) { event in
+        if case .userSignedOut = event.type {
+            // handle sign-out
+        }
+    }
+```
+
+### Subscribing via AsyncStream binding
+
+```swift
+struct ContentView: View {
+    @State private var eventStream: AsyncStream<SLWebViewEvent>?
+    let configuration: SLWebViewConfiguration
 
     var body: some View {
-        SLWebView(configuration: configuration) { _ in }
+        SLWebView(configuration: configuration)
             .eventStream($eventStream)
             .task {
                 guard let stream = eventStream else { return }
-
-                for await event in stream.commerceEvents {
-                    // Process commerce events as they arrive
-                    print("Commerce event: \(event)")
+                for await event in stream {
+                    print("[\(event.category.rawValue)] event received")
                 }
             }
     }
 }
 ```
 
-## Security
+### Filtered streams on SLWebViewEvents
 
-### Content Security Policy
+When using `SLWebViewViewModel` directly, the `events` property exposes pre-filtered streams:
 
 ```swift
-let securityPolicy = SecurityPolicy(
-    contentSecurityPolicy: """
-        default-src 'self';
-        script-src 'self' 'unsafe-inline';
-        style-src 'self' 'unsafe-inline';
-        img-src 'self' data: https:;
-        """
-)
+let viewModel = SLWebViewViewModel(configuration: configuration)
+
+Task {
+    for await event in viewModel.events.commerceEvents {
+        // only commerce events
+    }
+}
+
+// Available streams:
+// viewModel.events.events          — all events
+// viewModel.events.lifecycleEvents
+// viewModel.events.sessionEvents
+// viewModel.events.commerceEvents
+// viewModel.events.navigationEvents
+// viewModel.events.debugEvents
 ```
+
+### Loading Progress
+
+```swift
+struct ContentView: View {
+    @State private var progressStream: AsyncStream<Double>?
+    let configuration: SLWebViewConfiguration
+
+    var body: some View {
+        SLWebView(configuration: configuration)
+            .loadingProgressStream($progressStream)
+            .task {
+                guard let stream = progressStream else { return }
+                for await progress in stream {
+                    print("Loading: \(Int(progress * 100))%")
+                }
+            }
+    }
+}
+```
+
+## Navigation
+
+Access navigation controls via the `navigation` property:
+
+```swift
+let webView = SLWebView(configuration: configuration)
+
+webView.navigation.goBack()
+webView.navigation.goForward()
+webView.navigation.refresh()
+
+webView.navigation.canGoBack      // Bool
+webView.navigation.canGoForward   // Bool
+webView.navigation.loadingProgress // Double (0.0–1.0)
+```
+
+## Using SLWebViewViewModel directly
+
+For advanced use cases you can create and hold a `SLWebViewViewModel` independently:
+
+```swift
+@StateObject var viewModel = SLWebViewViewModel(configuration: configuration)
+
+var body: some View {
+    SLWebView(viewModel: viewModel)
+}
+
+// Published state
+viewModel.isLoading          // Bool
+viewModel.loadingProgress    // Double
+viewModel.connectionState    // ConnectionState
+viewModel.ssoStatus          // SSOStatus
+viewModel.onboardingState    // OnboardingState
+
+// Actions
+viewModel.reload()
+viewModel.goBack()
+viewModel.goForward()
+viewModel.clearSSO()
+```
+
+## Security
+
+### HTTPS enforcement
+
+- HTTPS is required for all `startUrl` values except `http://localhost` and `http://127.0.0.1`
+- The `startUrl` domain must be present in `allowedDomains`
+- Navigation to domains outside `allowedDomains` is blocked and emits a `navigationBlocked` event
+
+### PKCE
+
+The SDK uses PKCE (Proof Key for Code Exchange) for secure token exchange. Configure your Keycloak client as a public client (no client secret required).
 
 ## API Reference
 
@@ -328,62 +454,127 @@ let securityPolicy = SecurityPolicy(
 
 ```swift
 public struct SLWebView: View {
-    public init(
-        configuration: SLWebViewConfiguration,
-        showToolbar: Bool = true,
-        toolbarPlacement: ToolbarPlacement = .bottom,
-        onAction: @escaping (SLWebViewAction) -> Void
-    )
+    public init(configuration: SLWebViewConfiguration)
+    public init(viewModel: SLWebViewViewModel)
+    public var navigation: SLWebViewNavigation { get }
 }
-```
 
-### View Modifiers
-
-```swift
 extension SLWebView {
-    // Subscribe to all events
-    public func onEvent(_ handler: @escaping (SLWebViewEvent) -> Void) -> some View
+    public func onEvent(
+        perform action: @escaping (SLWebViewEvent) async -> Void
+    ) -> some View
 
-    // Subscribe to events by category
-    public func onEvent(category: SLWebViewEvent.Category, _ handler: @escaping (SLWebViewEvent) -> Void) -> some View
+    public func onEvent(
+        category: SLWebViewEvent.EventCategory,
+        perform action: @escaping (SLWebViewEvent) async -> Void
+    ) -> some View
 
-    // Access the event stream directly
-    public func eventStream(_ binding: Binding<SLWebViewEvents?>) -> some View
+    public func eventStream(
+        _ binding: Binding<AsyncStream<SLWebViewEvent>?>
+    ) -> some View
+
+    public func loadingProgressStream(
+        _ binding: Binding<AsyncStream<Double>?>
+    ) -> some View
 }
 ```
 
-### SLWebViewAction
+### SLWebViewNavigation
 
 ```swift
-public enum SLWebViewAction: Sendable {
-    case close
-    case reload
+@MainActor
+public struct SLWebViewNavigation {
+    public func goBack()
+    public func goForward()
+    public func refresh()
+    public var canGoBack: Bool { get }
+    public var canGoForward: Bool { get }
+    public var loadingProgress: Double { get }
+    public var loadingProgressStream: AsyncStream<Double> { get }
 }
 ```
 
-### Error Types
+### SLWebViewConfiguration.InitializationError
+
+Delivered to the `onInitializationError` callback:
 
 ```swift
-public enum SSOError: LocalizedError {
-    case missingAppStartUrl          // Token missing app_start_url claim
-    case invalidAppStartUrl(String)  // Invalid URL in app_start_url
-    case tokenValidationFailed        // Token signature/expiry validation failed
-    case ssoAuthenticationFailed      // SSO authentication process failed
-    case onboardingFailed(String)     // User onboarding flow failed
-    case networkError(String)         // Network connectivity issues
-    case invalidConfiguration         // Invalid SSO configuration
+public enum InitializationError: LocalizedError, Sendable {
+    case ssoAuthenticationFailed(String)  // SSO token exchange failed
+    case tokenValidationFailed(String)    // Token is invalid or expired
+    case invalidStartUrl(String)          // startUrl domain not in allowedDomains, or not HTTPS
+    case webViewCreationFailed(String)    // WebView setup failed
+    case networkError(String)             // Network connectivity issue during init
+    case onboardingFailed(String)         // Onboarding flow failed
+}
+```
+
+Each case exposes `errorDescription` and `resolutionGuidance` strings.
+
+### SSOError
+
+Internal errors surfaced via the event system (`.errorOccurred`) and `onInitializationError`:
+
+```swift
+public enum SSOError: Error, LocalizedError {
+    case noValidToken
+    case invalidToken
+    case injectionFailed(Error)
+    case invalidConfiguration(String)
+    case onboardingRequired(previewUrl: String, consentDefinitions: [ConsentDefinition]?)
+    case onboardingDeclined
+    case onboardingFailed(String)
+    case onboardingExpired
+}
+```
+
+### SLWebViewEvent
+
+```swift
+public struct SLWebViewEvent: Sendable {
+    public let type: EventType
+    public let category: EventCategory
+    public let data: [String: SendableValue]
+    public let timestamp: Date
+
+    // Data accessors
+    public func string(for key: String) -> String?
+    public func double(for key: String) -> Double?
+    public func url(for key: String) -> URL?
+    public var rawData: [String: Any] { get }
 }
 
-public enum ConfigurationError: LocalizedError {
-    case invalidURL(String)
-    case insecureURL(String)
-    case missingRequiredParameter(String)
+public enum EventCategory: String, CaseIterable, Sendable {
+    case lifecycle, commerce, session, navigation, debug
 }
 
-public enum NavigationError: LocalizedError {
-    case domainNotAllowed(String)
-    case insecureConnection(String)
-    case navigationFailed(String)
+public enum EventType: Sendable, Equatable {
+    // Lifecycle
+    case componentLoaded
+    case errorOccurred(Error?)
+    case tokenExpired
+    case reloadRequested
+    // Commerce
+    case purchaseCompleted
+    case purchaseFailed(Error?)
+    case checkoutStarted
+    case checkoutAbandoned
+    // Session
+    case sessionTimedOut
+    case userSignedOut
+    case userSignedIn
+    case sessionRefreshed
+    // Navigation
+    case externalLinkRequested(URL)
+    case navigationBlocked(URL)
+    case deepLinkRequested(URL)
+    case pageChanged(String)
+    // Debug
+    case logged(String, level: SLLogLevel)
+}
+
+public enum SLLogLevel: String, CaseIterable, Sendable {
+    case debug, info, warn, error
 }
 ```
 
@@ -392,109 +583,179 @@ public enum NavigationError: LocalizedError {
 ### Common Issues
 
 **WebView not loading:**
-- Ensure `app_start_url` claim is configured in your authentication server
-- Check domain is in `allowedDomains` list
-- Verify external token is valid
-- Check network connectivity
+- Ensure `startUrl` uses HTTPS (HTTP only allowed for `localhost` / `127.0.0.1`)
+- Check `startUrl` domain is in `allowedDomains`
+- Verify the `idToken` is valid and not expired
 
-**Missing app_start_url error:**
-- Add protocol mapper for `app_start_url` claim
-- Ensure mapper is added to access token
-- Verify client attribute contains the URL
+**SSO authentication failed:**
+- Verify `clientId` matches the Keycloak client
+- Confirm `subjectIssuer` matches the IDP alias configured in Keycloak
+- Ensure the Keycloak client has token exchange enabled
+- Verify `realm` is correct
 
 **Token validation failed:**
 - Check token expiry
-- Verify client is configured as public (no client secret)
-- Ensure PKCE is enabled for the client
-- Verify the external token is from the correct IDP
+- Ensure the Keycloak client is configured as a public client (no client secret)
+- Verify PKCE is enabled for the client
 
 **Events not firing:**
-- Confirm event subscription is set up before navigation
-- Check JavaScript is enabled for web-based events
+- Set up the event subscription before the view appears
+- Confirm `allowsJavaScript` is `true` (required for web-based events)
 
 **Navigation blocked:**
-- Domain not in `allowedDomains` list
+- Domain not in `allowedDomains`
 - HTTP URL attempted (HTTPS required except localhost)
-- Pop-up blocked by security policy
 
-**Onboarding flow issues:**
-- Ensure onboarding URL is in `allowedDomains`
+**Onboarding issues:**
+- Ensure the onboarding URL domain is in `allowedDomains`
 - Check authentication server has onboarding configured
-- Verify user attributes are properly set
 
 ### Debug Mode
 
 ```swift
-.onEvent(category: .debug) { event in
-    if case .logged(let level, let message, let metadata) = event.type {
-        print("[\(level)] \(message)")
+SLWebView(configuration: configuration)
+    .onEvent(category: .debug) { event in
+        if case .logged(let message, let level) = event.type {
+            print("[\(level.rawValue.uppercased())] \(message)")
+        }
     }
-}
 ```
 
 ## Migration Guide
 
-### Migrating from 1.x to 2.0
+### Migrating from previous versions
 
-Version 2.0 introduces several breaking changes to improve security and functionality:
+#### 1. `startUrl` is now a required parameter on `SLWebViewConfiguration`
 
-#### 1. Removed Direct URL Configuration
 ```swift
-// OLD (1.x)
-SLWebViewConfiguration.default(
-    with: URL(string: "https://app.com")!,
-    and: ssoConfig
-)
-
-// NEW (2.0)
+// OLD (1.x) — no startUrl, URL was determined server-side
 SLWebViewConfiguration(
-    securityPolicy: SecurityPolicy(allowedDomains: ["*.app.com"]),
+    securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfig
 )
-// URL now comes from app_start_url token claim
+
+// NEW (2.0) — startUrl required
+SLWebViewConfiguration(
+    securityPolicy: securityPolicy,
+    ssoConfiguration: ssoConfig,
+    startUrl: URL(string: "https://app.your-domain.com")!
+)
 ```
 
-#### 2. Updated SSO Configuration
+#### 2. `SLWebView` init no longer takes an action closure
+
 ```swift
-// OLD (1.x)
+// OLD (2.0.x) — required onAction closure, showToolbar, toolbarPlacement
+SLWebView(configuration: configuration, showToolbar: true) { action in
+    switch action {
+    case .close: dismiss()
+    case .reload: break
+    }
+}
+
+// NEW — no closure; use .onEvent for reactions
+SLWebView(configuration: configuration)
+    .onEvent(category: .lifecycle) { event in
+        if case .reloadRequested = event.type { /* handle */ }
+    }
+```
+
+#### 3. Updated SSO Configuration
+
+```swift
+// OLD (2.0.x)
 SSOConfiguration(
     clientId: "client",
-    idToken: token,
+    externalToken: token,   // was externalToken
     subjectIssuer: "google",
-    realm: "realm"
+    realm: "realm",
+    environment: .production
 )
 
-// NEW (2.0)
+// NEW
 SSOConfiguration(
     clientId: "client",
-    externalToken: token,
+    idToken: token,         // renamed to idToken
     protocolConfig: .oidc(OIDCProtocolConfiguration(
         subjectIssuer: "google"
     )),
     realm: "realm",
-    environment: .production
+    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
 )
 ```
 
-#### 3. Added Error Handling
+#### 4. Updated SecurityPolicy
+
 ```swift
-// NEW (2.0) - Add initialization error callback
+// OLD (1.x) — had enforceHTTPS, blockPopups, contentSecurityPolicy params
+SecurityPolicy(
+    allowedDomains: ["*.your-domain.com"],
+    enforceHTTPS: true
+)
+
+// NEW (2.0) — only allowedDomains and allowsLocalStorage
+SecurityPolicy(
+    allowedDomains: ["*.your-domain.com"],
+    allowsLocalStorage: false
+)
+```
+
+#### 5. Added initialization error callback
+
+```swift
 SLWebViewConfiguration(
     securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfiguration,
+    startUrl: startUrl,
     onInitializationError: { error in
-        // Handle initialization errors
+        print(error.errorDescription ?? "")
+        print(error.resolutionGuidance)
     }
 )
 ```
 
-#### 4. iOS Support
-- Now supports iOS 15+ (previously iOS 17+)
+#### 6. iOS 15+ support (previously iOS 17+)
 
-#### 5. Security Enhancements
-- PKCE implementation for OAuth flows
-- No client secret required (public client)
-- app_start_url validation from token claims
+#### 7. `EnvironmentConfig` presets removed
+
+```swift
+// OLD (2.0.x) — built-in presets
+environment: .production
+environment: .staging
+environment: .development
+
+// NEW — use .custom() for all remote environments
+environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+environment: .local()         // local dev (port 8200)
+environment: .local(port: 8080)
+```
+
+#### 8. `SAMLProtocolConfiguration` parameter renamed
+
+```swift
+// OLD (2.0.x)
+SAMLProtocolConfiguration(entityId: "your-entity-id")
+
+// NEW
+SAMLProtocolConfiguration(identityProviderAlias: "your-idp-alias")
+```
+
+#### 9. `eventStream` binding type changed
+
+```swift
+// OLD (2.0.x)
+@State private var eventStream: SLWebViewEvents?
+// ...
+.eventStream($eventStream)
+for await event in stream.commerceEvents { }
+
+// NEW
+@State private var eventStream: AsyncStream<SLWebViewEvent>?
+// ...
+.eventStream($eventStream)
+for await event in stream { }
+// For filtered streams, use viewModel.events.commerceEvents directly
+```
 
 ## License
 
