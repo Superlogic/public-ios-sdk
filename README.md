@@ -152,7 +152,6 @@ SLWebViewConfiguration(
     allowsJavaScript: Bool = true,
     mediaPlaybackRequiresUserAction: Bool = true,
     basicAuthHeaderValue: String? = nil,  // For dev/staging basic auth only
-    authButtonPatterns: AuthButtonPatterns = .defaultEnglish,
     onInitializationError: (@Sendable (InitializationError) -> Void)? = nil
 )
 ```
