@@ -379,6 +379,14 @@ webView.navigation.canGoForward   // Bool
 webView.navigation.loadingProgress // Double (0.0–1.0)
 ```
 
+### Swipe Gestures
+
+The SDK enables swipe-to-navigate gestures by default, matching Mobile Safari behavior:
+- **Swipe right** to go back in navigation history
+- **Swipe left** to go forward in navigation history
+
+This provides a natural, familiar navigation experience for users.
+
 ## Using SLWebViewViewModel directly
 
 For advanced use cases you can create and hold a `SLWebViewViewModel` independently:
@@ -432,7 +440,7 @@ Use a description that makes sense for your app's context.
 
 ## Deep Link Handling
 
-The SDK automatically intercepts custom URL scheme links encountered during WebView navigation (for example, `monaco://pay?...` from a third-party payment checkout) and routes them to the system launcher so the correct app can open.
+The SDK automatically intercepts custom URL scheme links encountered during WebView navigation (for example, `myapp://payment?...` from a third-party checkout flow) and routes them to the system launcher so the correct app can open.
 
 ### How It Works
 
