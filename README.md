@@ -4,7 +4,7 @@ A modern, secure WebView SDK for iOS applications built with SwiftUI, providing 
 
 ## Features
 
-- **Secure by Default**: HTTPS-only, domain allowlisting, and configurable security policies
+- **Secure by Default**: HTTPS-only with configurable security policies
 - **SwiftUI Native**: Built specifically for SwiftUI with iOS 15+ support
 - **Reactive Events**: AsyncStream-based event system with category filtering
 - **SSO Integration**: Built-in Single Sign-On using PKCE and cookie-based authentication
@@ -50,9 +50,6 @@ struct ContentView: View {
     var body: some View {
         SLWebView(
             configuration: SLWebViewConfiguration(
-                securityPolicy: SecurityPolicy(
-                    allowedDomains: ["*.your-domain.com"]
-                ),
                 ssoConfiguration: SSOConfiguration(
                     clientId: "your-client-id",
                     idToken: idToken,
@@ -75,9 +72,6 @@ Handle initialization errors via the `onInitializationError` callback:
 
 ```swift
 let configuration = SLWebViewConfiguration(
-    securityPolicy: SecurityPolicy(
-        allowedDomains: ["*.your-domain.com"]
-    ),
     ssoConfiguration: SSOConfiguration(
         clientId: "your-client-id",
         idToken: idToken,
@@ -109,6 +103,9 @@ let configuration = SLWebViewConfiguration(
             // Onboarding flow failed
             print(message)
         case .webViewCreationFailed(let message):
+            print(message)
+        case .partnerEnrollmentRequired(let message):
+            // Partner enrollment required
             print(message)
         }
     }
@@ -146,50 +143,31 @@ SLWebView(configuration: configuration)
 
 ```swift
 SLWebViewConfiguration(
-    securityPolicy: SecurityPolicy,       // Required
     ssoConfiguration: SSOConfiguration,  // Required
     startUrl: URL,                        // Required - initial URL after authentication
-    allowsJavaScript: Bool = true,
     mediaPlaybackRequiresUserAction: Bool = true,
     basicAuthHeaderValue: String? = nil,  // For dev/staging basic auth only
     onInitializationError: (@Sendable (InitializationError) -> Void)? = nil
 )
 ```
 
+**Note:** `SecurityPolicy` and `allowsJavaScript` parameters are deprecated. JavaScript is always enabled as required by the SDK.
+
 **Presets:**
 
 ```swift
-// Strict: JavaScript disabled, localStorage blocked, media requires user action
+// Strict: media requires user action
 SLWebViewConfiguration.strict(
-    securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfig,
     startUrl: startUrl
 )
 
-// Relaxed: JavaScript enabled, localStorage allowed, media plays automatically
+// Relaxed: media plays automatically
 SLWebViewConfiguration.relaxed(
-    securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfig,
     startUrl: startUrl
 )
 ```
-
-### Security Policy
-
-```swift
-let securityPolicy = SecurityPolicy(
-    allowedDomains: [
-        "*.your-domain.com",  // Wildcard: matches app.your-domain.com and your-domain.com
-        "api.example.com"     // Exact domain match
-    ],
-    allowsLocalStorage: false // Default: false
-)
-```
-
-Domain matching rules:
-- `"*.example.com"` matches `app.example.com` and `example.com`
-- `"example.com"` matches only `example.com`
-- Empty `allowedDomains` blocks all navigation (secure by default)
 
 ### SSO Configuration
 
@@ -230,30 +208,20 @@ let ssoConfig = SSOConfiguration(
 )
 ```
 
-#### SAML
-
-```swift
-let ssoConfig = SSOConfiguration(
-    clientId: "mobile-app-client",
-    idToken: samlAssertion,
-    protocolConfig: .saml(SAMLProtocolConfiguration(
-        identityProviderAlias: "your-saml-idp"
-    )),
-    realm: "your-realm",
-    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
-)
-```
-
 ### Environment Configuration
+
+The SDK provides two environment options:
 
 ```swift
 // Local development (defaults to port 8200)
-environment: .local()
-environment: .local(port: 8080)
+.local()
+.local(port: 8080)
 
-// Any remote environment (staging, production, etc.)
-environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+// Remote environments (staging, production, etc.)
+.custom(authServerBaseURL: "https://auth.your-domain.com")
 ```
+
+**Note:** Previous environment presets (`.dev`, `.staging`, `.production`) have been removed. Use `.custom(authServerBaseURL:)` for all remote environments.
 
 ### OIDC Security Options
 
@@ -283,6 +251,7 @@ OIDCProtocolConfiguration(
         validateSignature: true,
         jwksURL: "https://auth.your-domain.com/realms/your-realm/protocol/openid-connect/certs",
         expectedIssuer: "https://auth.your-domain.com/realms/your-realm",
+        expectedAudience: "your-client-id",
         clockSkewTolerance: 30
     )
 )
@@ -308,7 +277,7 @@ onInitializationError: { error in
 
 | Category | Event types |
 |----------|-------------|
-| **lifecycle** | `componentLoaded`, `errorOccurred`, `tokenExpired`, `reloadRequested` |
+| **lifecycle** | `componentLoaded`, `errorOccurred`, `tokenExpired`, `reloadRequested`, `partnerEnrollStarted`, `partnerEnrollComplete` |
 | **session** | `userSignedIn`, `userSignedOut`, `sessionTimedOut`, `sessionRefreshed` |
 | **commerce** | `purchaseCompleted`, `purchaseFailed`, `checkoutStarted`, `checkoutAbandoned` |
 | **navigation** | `pageChanged`, `navigationBlocked`, `externalLinkRequested`, `deepLinkRequested` |
@@ -440,12 +409,72 @@ viewModel.clearSSO()
 ### HTTPS enforcement
 
 - HTTPS is required for all `startUrl` values except `http://localhost` and `http://127.0.0.1`
-- The `startUrl` domain must be present in `allowedDomains`
-- Navigation to domains outside `allowedDomains` is blocked and emits a `navigationBlocked` event
+- The SDK validates the `startUrl` during initialization and reports errors via the `onInitializationError` callback
 
 ### PKCE
 
 The SDK uses PKCE (Proof Key for Code Exchange) for secure token exchange. Configure your Keycloak client as a public client (no client secret required).
+
+## Device Permissions
+
+### Geolocation
+
+WKWebView handles geolocation natively — no code changes are required in the library or your app. The system location permission dialog appears automatically the first time an embedded site calls `navigator.geolocation`.
+
+**Required:** add `NSLocationWhenInUseUsageDescription` to your app's `Info.plist`. Without it the system will not show the permission dialog and geolocation requests will fail silently.
+
+```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>This app uses your location for the embedded site.</string>
+```
+
+Use a description that makes sense for your app's context.
+
+## Deep Link Handling
+
+The SDK automatically intercepts custom URL scheme links encountered during WebView navigation (for example, `monaco://pay?...` from a third-party payment checkout) and routes them to the system launcher so the correct app can open.
+
+### How It Works
+
+At first use the SDK reads `CFBundleURLTypes` from the host app's `Info.plist` and builds the set of custom schemes the app has registered. When the WebView encounters a URL whose scheme is in that set, the SDK:
+
+1. Cancels default WebView navigation
+2. Calls `UIApplication.shared.open(_:)` to hand off to the system
+3. Emits a `deepLinkRequested` event with the URL and an `opened` flag
+
+Standard schemes are never intercepted: `http`, `https`, `about`, `javascript`, `file`, `data`.
+
+### Setup
+
+No SDK configuration required. Register the scheme in your `Info.plist` (which you must do anyway to receive URLs from other apps):
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleURLName</key>
+        <string>com.example.myscheme</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>myscheme</string>
+        </array>
+    </dict>
+</array>
+```
+
+The SDK picks this up automatically — no changes to `SLWebViewConfiguration` are needed.
+
+### Event
+
+```swift
+SLWebView(configuration: config)
+    .onEvent { event in
+        if case .deepLinkRequested(let url) = event.type {
+            let opened = event.data["opened"] as? Bool ?? false
+            print("Deep link \(url) — opened: \(opened)")
+        }
+    }
+```
 
 ## API Reference
 
@@ -501,10 +530,11 @@ Delivered to the `onInitializationError` callback:
 public enum InitializationError: LocalizedError, Sendable {
     case ssoAuthenticationFailed(String)  // SSO token exchange failed
     case tokenValidationFailed(String)    // Token is invalid or expired
-    case invalidStartUrl(String)          // startUrl domain not in allowedDomains, or not HTTPS
+    case invalidStartUrl(String)          // Start URL validation failed
     case webViewCreationFailed(String)    // WebView setup failed
     case networkError(String)             // Network connectivity issue during init
     case onboardingFailed(String)         // Onboarding flow failed
+    case partnerEnrollmentRequired(String) // Partner enrollment is required
 }
 ```
 
@@ -524,6 +554,7 @@ public enum SSOError: Error, LocalizedError {
     case onboardingDeclined
     case onboardingFailed(String)
     case onboardingExpired
+    case partnerEnrollmentRequired(accessToken: String)
 }
 ```
 
@@ -553,6 +584,8 @@ public enum EventType: Sendable, Equatable {
     case errorOccurred(Error?)
     case tokenExpired
     case reloadRequested
+    case partnerEnrollStarted
+    case partnerEnrollComplete
     // Commerce
     case purchaseCompleted
     case purchaseFailed(Error?)
@@ -583,8 +616,8 @@ public enum SLLogLevel: String, CaseIterable, Sendable {
 
 **WebView not loading:**
 - Ensure `startUrl` uses HTTPS (HTTP only allowed for `localhost` / `127.0.0.1`)
-- Check `startUrl` domain is in `allowedDomains`
 - Verify the `idToken` is valid and not expired
+- Check the `onInitializationError` callback for specific error details
 
 **SSO authentication failed:**
 - Verify `clientId` matches the Keycloak client
@@ -599,15 +632,15 @@ public enum SLLogLevel: String, CaseIterable, Sendable {
 
 **Events not firing:**
 - Set up the event subscription before the view appears
-- Confirm `allowsJavaScript` is `true` (required for web-based events)
+- JavaScript is always enabled in the SDK (required for web-based events)
 
-**Navigation blocked:**
-- Domain not in `allowedDomains`
+**Navigation issues:**
 - HTTP URL attempted (HTTPS required except localhost)
+- Check the `onInitializationError` callback for validation errors
 
 **Onboarding issues:**
-- Ensure the onboarding URL domain is in `allowedDomains`
 - Check authentication server has onboarding configured
+- Verify the user completes the onboarding flow
 
 ### Debug Mode
 
@@ -624,7 +657,24 @@ SLWebView(configuration: configuration)
 
 ### Migrating from previous versions
 
-#### 1. `startUrl` is now a required parameter on `SLWebViewConfiguration`
+#### 1. `SecurityPolicy` is now deprecated (3.0+)
+
+```swift
+// OLD (2.x) — required SecurityPolicy with allowedDomains
+SLWebViewConfiguration(
+    securityPolicy: SecurityPolicy(allowedDomains: ["*.your-domain.com"]),
+    ssoConfiguration: ssoConfig,
+    startUrl: URL(string: "https://app.your-domain.com")!
+)
+
+// NEW (3.0+) — SecurityPolicy deprecated, remove it
+SLWebViewConfiguration(
+    ssoConfiguration: ssoConfig,
+    startUrl: URL(string: "https://app.your-domain.com")!
+)
+```
+
+#### 2. `startUrl` is now a required parameter on `SLWebViewConfiguration` (2.0+)
 
 ```swift
 // OLD (1.x) — no startUrl, URL was determined server-side
@@ -633,15 +683,14 @@ SLWebViewConfiguration(
     ssoConfiguration: ssoConfig
 )
 
-// NEW (2.0) — startUrl required
+// NEW (2.0+) — startUrl required
 SLWebViewConfiguration(
-    securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfig,
     startUrl: URL(string: "https://app.your-domain.com")!
 )
 ```
 
-#### 2. `SLWebView` init no longer takes an action closure
+#### 3. `SLWebView` init no longer takes an action closure
 
 ```swift
 // OLD (2.0.x) — required onAction closure, showToolbar, toolbarPlacement
@@ -659,7 +708,7 @@ SLWebView(configuration: configuration)
     }
 ```
 
-#### 3. Updated SSO Configuration
+#### 4. Updated SSO Configuration
 
 ```swift
 // OLD (2.0.x)
@@ -683,27 +732,25 @@ SSOConfiguration(
 )
 ```
 
-#### 4. Updated SecurityPolicy
+#### 5. `SecurityPolicy` parameters removed (3.0+)
+
+`SecurityPolicy` is now deprecated. The SDK no longer requires explicit domain allowlisting - security is managed internally.
 
 ```swift
-// OLD (1.x) — had enforceHTTPS, blockPopups, contentSecurityPolicy params
-SecurityPolicy(
-    allowedDomains: ["*.your-domain.com"],
-    enforceHTTPS: true
-)
-
-// NEW (2.0) — only allowedDomains and allowsLocalStorage
+// OLD (2.x) — SecurityPolicy with domain configuration
 SecurityPolicy(
     allowedDomains: ["*.your-domain.com"],
     allowsLocalStorage: false
 )
+
+// NEW (3.0+) — SecurityPolicy deprecated, no replacement needed
+// Remove SecurityPolicy from your configuration
 ```
 
-#### 5. Added initialization error callback
+#### 6. Added initialization error callback
 
 ```swift
 SLWebViewConfiguration(
-    securityPolicy: securityPolicy,
     ssoConfiguration: ssoConfiguration,
     startUrl: startUrl,
     onInitializationError: { error in
@@ -713,30 +760,20 @@ SLWebViewConfiguration(
 )
 ```
 
-#### 6. iOS 15+ support (previously iOS 17+)
+#### 7. iOS 15+ support (previously iOS 17+)
 
-#### 7. `EnvironmentConfig` presets removed
+#### 8. `EnvironmentConfig` presets removed (3.0+)
 
 ```swift
-// OLD (2.0.x) — built-in presets
+// OLD (2.x) — built-in presets
 environment: .production
 environment: .staging
 environment: .development
 
-// NEW — use .custom() for all remote environments
+// NEW (3.0+) — use .custom() for all remote environments
 environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
 environment: .local()         // local dev (port 8200)
 environment: .local(port: 8080)
-```
-
-#### 8. `SAMLProtocolConfiguration` parameter renamed
-
-```swift
-// OLD (2.0.x)
-SAMLProtocolConfiguration(entityId: "your-entity-id")
-
-// NEW
-SAMLProtocolConfiguration(identityProviderAlias: "your-idp-alias")
 ```
 
 #### 9. `eventStream` binding type changed
