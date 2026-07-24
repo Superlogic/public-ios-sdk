@@ -374,6 +374,37 @@ Task {
 // viewModel.events.debugEvents
 ```
 
+### Error Event Data
+
+Every `errorOccurred` event carries structured data for logging and handling:
+
+| Key | Description |
+|-----|-------------|
+| `error` | Human-readable message |
+| `code` | Stable numeric error code (see below) |
+| `domain` | Error domain, e.g. `SuperlogicWebViewKit.AuthenticationError` |
+| `underlyingCode`, `underlyingDomain`, `underlyingError` | The original wrapped error's code/domain/message — present only when the SDK error wraps another (e.g. a network failure) |
+
+`code` is **stable per error type** — it never changes and never depends on the wrapped error, so it's safe to branch on. Server responses report the **actual HTTP status** (`400`, `500`, …); all other errors use SDK codes **outside the HTTP range (100–599)** so the two never collide:
+
+| Code | Meaning |
+|------|---------|
+| `1001`–`1009` | SSO / onboarding errors |
+| `2000` | Network error |
+| `2001`–`2005` | Authentication errors (invalid token, configuration, response, etc.) |
+| actual HTTP status | Server error response |
+
+```swift
+SLWebView(configuration: configuration)
+    .onEvent { event in
+        guard case .errorOccurred = event.type else { return }
+        let code = event.rawData["code"] as? Int            // e.g. 2000
+        let domain = event.string(for: "domain")            // e.g. "SuperlogicWebViewKit.AuthenticationError"
+        // Original error, when this one wraps another (e.g. a network failure):
+        let underlyingCode = event.rawData["underlyingCode"] as? Int   // e.g. -1009
+    }
+```
+
 ### Loading Progress
 
 ```swift
