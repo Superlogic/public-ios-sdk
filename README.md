@@ -278,7 +278,7 @@ The SDK does not validate the assertion. Keycloak validates it.
 
 **Errors**
 
-These errors reach `onInitializationError`:
+For each error below, `onInitializationError` receives `.ssoAuthenticationFailed(message)`. To find the cause, read `code` and `underlyingCode` in the `errorOccurred` event (see [Error Event Data](#error-event-data)):
 
 | Error | Code | Cause |
 |-------|------|-------|
