@@ -230,6 +230,48 @@ let ssoConfig = SSOConfiguration(
 )
 ```
 
+#### JWT authorization grant (your backend issues a signed JWT)
+
+Available from `2.2.0`. Use when your backend can issue a signed JWT for the user. The SDK sends it to Keycloak with the JWT authorization grant ([RFC 7523](https://datatracker.ietf.org/doc/html/rfc7523)) and authenticates as a confidential client, so no `subjectIssuer` set-up is needed:
+
+```swift
+let ssoConfig = SSOConfiguration(
+    credentials: AuthCredentials(
+        clientId: "your-confidential-client",
+        assertionToken: signedJWT,   // Fresh, short-lived JWT issued by your backend
+        clientSecret: clientSecret   // Issued to you by Superlogic
+    ),
+    protocolConfig: .oidc(OIDCProtocolConfiguration(
+        subjectIssuer: ""            // Not read in this flow
+    )),
+    realm: "your-realm",
+    environment: .custom(authServerBaseURL: "https://auth.your-domain.com")
+)
+```
+
+- A non-blank `assertionToken` selects this flow. If `idToken` is also set, the SDK uses `assertionToken` and ignores `idToken`.
+- Issue a fresh, short-lived assertion for each `SLWebView` launch. Do not cache or reuse it.
+- `clientSecret` is issued to each integrator. Do not log it and do not store it in plain text. The SDK redacts it, and every token, in `description`, `debugDescription`, `dump` and its own logs.
+- This flow has no onboarding, no consent collection and no partner enrollment. The SDK ignores `onboardingConfiguration` and consents, so collect consent before you issue the assertion.
+- Leave `isPreAuthenticated` as `false`.
+
+The SDK checks the configuration before any network request. A failure arrives in `onInitializationError` as `.ssoAuthenticationFailed`. The underlying `AuthenticationError` is in `SLWebViewViewModel.connectionState` (`.failed(error)`), with these codes:
+
+| Code | Cause |
+|------|-------|
+| `2002` | `assertionToken` is set together with `isPreAuthenticated: true` |
+| `2005` | `clientSecret` is missing or blank |
+
+Keycloak errors report the HTTP status as the code (4xx is not retried). A wrong `clientId` or `clientSecret` returns `invalid_client`. Common `invalid_grant` causes:
+
+| Cause | Keycloak message (typical) |
+|-------|----------------------------|
+| Assertion `exp` is in the past, or the lifetime is longer than the realm allows | Token expired / invalid lifetime |
+| `aud` is not in the allowed audiences, or the assertion has more than one audience | `Invalid token audience` / `Multiple audiences not allowed` |
+| `iss` does not match an IdP in the realm, or the signature does not verify against its JWKS | Invalid issuer / invalid signature |
+| A local user with the same username or email exists but has no link to the IdP | `User not found` |
+| The assertion was used before (`jti` replay) | Token reuse / invalid grant |
+
 #### SAML
 
 ```swift
