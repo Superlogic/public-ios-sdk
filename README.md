@@ -230,6 +230,73 @@ let ssoConfig = SSOConfiguration(
 )
 ```
 
+#### JWT authorization grant
+
+Use when your backend issues a signed JWT for the user. The SDK exchanges the JWT (the assertion) for a session, so your app needs no external IDP token:
+
+```swift
+let ssoConfig = SSOConfiguration(
+    credentials: AuthCredentials(
+        clientId: "mobile-app-client",
+        assertionToken: signedJwtFromYourBackend,
+        clientSecret: clientSecret          // Issued to each integrator
+    ),
+    // subjectIssuer is not read in this flow
+    protocolConfig: .oidc(OIDCProtocolConfiguration(subjectIssuer: "")),
+    realm: "your-realm",
+    environment: .custom(authServerBaseURL: "https://auth.your-domain.com") // No trailing slash
+)
+```
+
+When `assertionToken` is set, the SDK uses this flow and ignores `idToken`.
+
+> **Warning:** this flow has no onboarding, no consent collection and no partner enrollment. The SDK ignores the onboarding configuration and consents. Collect user consent before you issue the assertion.
+
+**Requirements**
+
+- `clientSecret` is issued to each integrator. Do not log it and do not store it in plain text.
+- Issue a fresh, short-lived assertion for each `SLWebView` launch. Do not cache or reuse it.
+- `protocolConfig` must be `.oidc`, with `isPreAuthenticated: false`.
+
+**Assertion claims**
+
+The SDK does not validate the assertion. Keycloak validates it.
+
+| Claim | Required | Description |
+|-------|----------|-------------|
+| `jti` | Yes | Unique token ID. A reused `jti` can be rejected. |
+| `iss` | Yes | Issuer. Must match an IDP allowed by the realm. |
+| `sub` | Yes | Your user ID. |
+| `aud` | Yes | One allowed audience, for example the realm URL. |
+| `iat` | Yes | Issued-at time, in seconds since the epoch. |
+| `exp` | Yes | Expiry time, in seconds since the epoch. Keep the lifetime short. |
+| `email` | Yes | User email. |
+| `preferred_username` | No | Preferred username. |
+| `given_name` | No | User first name. |
+| `family_name` | No | User last name. |
+| `email_verified` | No | Must be a JSON boolean (`true`), not the string `"true"`. |
+
+**Errors**
+
+For each error below, `onInitializationError` receives `.ssoAuthenticationFailed(message)`. To find the cause, read `code` and `underlyingCode` in the `errorOccurred` event (see [Error Event Data](#error-event-data)):
+
+| Error | Code | Cause |
+|-------|------|-------|
+| `AuthenticationError.invalidConfiguration` | 2002 | `protocolConfig` is SAML, or `isPreAuthenticated` is `true` |
+| `AuthenticationError.missingRequiredParameter("clientSecret")` | 2005 | `clientSecret` is nil or blank |
+| `AuthenticationError.serverError(statusCode:message:)` | HTTP status | Keycloak rejected the request. 4xx is not retried. 5xx and 429 are retried. |
+
+Common causes of a Keycloak rejection:
+
+| Cause | Typical message |
+|-------|-----------------|
+| `exp` is in the past, or the lifetime is longer than the realm allows | Token expired / invalid lifetime |
+| `aud` is not allowed, or the assertion has more than one audience | `Invalid token audience` / `Multiple audiences not allowed` |
+| `iss` does not match an IDP, or the signature does not verify | Invalid issuer / invalid signature |
+| A local user with the same username or email has no link to the IDP | `User not found` |
+| The assertion was used before | Token reuse / invalid grant |
+| Wrong `clientId` or `clientSecret` | `invalid_client` |
+
 #### SAML
 
 ```swift
